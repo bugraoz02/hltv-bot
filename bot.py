@@ -6,9 +6,7 @@ import time
 
 # --- 1. AYARLAR ---
 HEDEF_URL = "https://www.hltv.org/results"
-# 20 dakikayi 1 gune (1440 dakikaya) cikardik.
-# Artik son 24 saat icinde bitmis en guncel maci paylasir.
-MAX_DAKIKA = 1440 
+MAX_DAKIKA = 25  # Mac biteli 25 dakikayi gectiyse "Eski" say ve paylasma.
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
@@ -40,13 +38,13 @@ def bayrak_getir(takim_adi):
 def twitter_client_v2():
     return tweepy.Client(consumer_key=api_key, consumer_secret=api_secret, access_token=access_token, access_token_secret=access_secret)
 
-# --- 4. AKILLI DATA CEKME ---
+# --- 4. DATA CEKME ---
 def ajan_modu():
-    print(f"HLTV kontrol ediliyor (Son {MAX_DAKIKA} dakika / 24 Saat)...")
+    print(f"HLTV kontrol ediliyor (Zaman Siniri: {MAX_DAKIKA} dk)...")
     
     try:
-        # Chrome taklidi ile siteye gir
-        response = requests.get(HEDEF_URL, impersonate="chrome110", timeout=20)
+        # Chrome 124 taklidi (En guncel tarayici kimligi)
+        response = requests.get(HEDEF_URL, impersonate="chrome124", timeout=30)
         
         if response.status_code != 200:
             print(f"HATA! Siteye girilemedi. Kod: {response.status_code}")
@@ -54,38 +52,51 @@ def ajan_modu():
 
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Tum sonuclari al
+        # Sonuc kutularini bul
         tum_sonuclar = soup.find_all('div', class_='result-con')
-        son_mac = None
         
-        # Listeyi tara ve zamani okunabilen ilk gecerli maci bul
-        for aday in tum_sonuclar:
-            if 'data-unix' in aday.attrs:
-                son_mac = aday
-                break 
+        if not tum_sonuclar:
+            print("Sayfada mac sonucu bulunamadi.")
+            return
+
+        # En ustteki maci al
+        son_mac = tum_sonuclar[0]
         
-        if son_mac:
-            # --- ZAMAN KONTROLU ---
+        # --- ZAMAN KONTROL MEKANIZMASI ---
+        tweet_atilsin_mi = True
+        
+        # 'data-unix' etiketi var mi diye kontrol et (.get metodu hata vermez, yoksa None doner)
+        unix_zaman = son_mac.get('data-unix')
+        
+        if unix_zaman:
             try:
-                mac_zamani_ms = int(son_mac['data-unix'])
+                mac_zamani_ms = int(unix_zaman)
                 mac_zamani_sec = mac_zamani_ms / 1000
                 su_an = time.time()
                 gecen_sure_dk = (su_an - mac_zamani_sec) / 60
                 
-                print(f"Tespit edilen maç {int(gecen_sure_dk)} dakika önce bitmiş.")
+                print(f"🕒 Bu maç {int(gecen_sure_dk)} dakika önce bitmiş.")
                 
-                # 1440 dakikadan (24 saatten) eskiyse paylasma
                 if gecen_sure_dk > MAX_DAKIKA:
-                    print(f"🛑 ESKI MAC ({int(gecen_sure_dk)} dk). Pas geciliyor.")
-                    return 
+                    print(f"⛔ ESKI MAC! ({int(gecen_sure_dk)} dk > {MAX_DAKIKA} dk). Paylaşılmayacak.")
+                    tweet_atilsin_mi = False
+                else:
+                    print("✅ MAÇ YENİ! Paylaşıma uygun.")
                     
-            except Exception as e:
-                print(f"Zaman okunamadi, devam ediliyor: {e}")
+            except:
+                print("⚠️ Zaman etiketi var ama okunamadı. Yinede deneniyor.")
+        else:
+            print("⚠️ Zaman etiketi bulunamadı (HLTV gizlemiş). Twitter kontrolüne güvenilecek.")
 
-            # Eger buraya geldiysek mac son 24 saat icindedir.
+        # Eger zaman kontrolunden gectiyse veya zaman bulunamadiysa devam et
+        if tweet_atilsin_mi:
             takimlar = son_mac.find_all('div', class_='team')
-            takim1 = takimlar[0].text.strip()
-            takim2 = takimlar[1].text.strip()
+            if len(takimlar) >= 2:
+                takim1 = takimlar[0].text.strip()
+                takim2 = takimlar[1].text.strip()
+            else:
+                return
+
             skor_span = son_mac.find('td', class_='result-score')
             skor = skor_span.text.strip() if skor_span else "Bitti"
             
@@ -94,12 +105,8 @@ def ajan_modu():
             except:
                 turnuva = "CS2 Turnuvası"
 
-            print(f"✅ TWEET HAZIRLANIYOR: {takim1} vs {takim2}")
+            print(f"🐦 TWEET HAZIRLANIYOR: {takim1} vs {takim2}")
 
-            # Tweet Hazirla
-            bayrak1 = bayrak_getir(takim1)
-            bayrak2 = bayrak_getir(takim2)
-            
             tweet_metni = (
                 f"🚨 MAÇ SONUCU\n\n"
                 f"{takim1} {bayrak1} 🆚 {takim2} {bayrak2}\n"
@@ -115,16 +122,12 @@ def ajan_modu():
                 print("✅ TWEET BASARIYLA ATILDI!")
             
             except tweepy.errors.Forbidden as e:
-                # Ayni maci tekrar paylasmaya calisirsak Twitter engeller, sorun yok.
                 if "duplicate" in str(e).lower():
-                    print("🛑 Twitter engelledi: Bu tweet zaten var (Spam korumasi).")
+                    print("🛑 DURDURULDU: Bu tweet zaten var (Twitter Duplicate Koruması).")
                 else:
                     print(f"⚠️ HATA: {e}")
             except Exception as e:
                 print(f"Genel Hata: {e}")
-            
-        else:
-            print("Gecerli mac bulunamadi.")
 
     except Exception as e:
         print(f"Kritik Hata: {e}")
