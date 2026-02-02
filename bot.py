@@ -1,11 +1,11 @@
 import tweepy
-import requests # RSS icin cloudscraper yerine requests yeterli olabilir
+from curl_cffi import requests # EN GUCLU ENGEL ASICI
 from bs4 import BeautifulSoup
 import os
 import time
 
 # --- 1. AYARLAR ---
-# ARTIK HTML DEGIL, RSS FEED KULLANIYORUZ (ARKA KAPI)
+# Hem RSS hem Chrome taklidi kullaniyoruz
 HEDEF_URL = "https://www.hltv.org/rss/results"
 
 # --- 2. GITHUB SIFRELERI ---
@@ -38,20 +38,17 @@ def bayrak_getir(takim_adi):
 def twitter_client_v2():
     return tweepy.Client(consumer_key=api_key, consumer_secret=api_secret, access_token=access_token, access_token_secret=access_secret)
 
-# --- 4. RSS DATA CEKME ---
-def rss_tara():
-    print("HLTV RSS Feed (Arka Kapi) kontrol ediliyor...")
-    
-    # RSS okurken Google Bot taklidi yapiyoruz, genelde izin verirler
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-    }
+# --- 4. DATA CEKME ---
+def ajan_modu():
+    print("HLTV 'Chrome 110' Parmak Izi ile kontrol ediliyor...")
     
     try:
-        response = requests.get(HEDEF_URL, headers=headers, timeout=10)
+        # SIHIRLI KISIM: impersonate="chrome110"
+        # Bu satir Cloudflare'e "Yemin ederim ben Chrome tarayicisiyim" der.
+        response = requests.get(HEDEF_URL, impersonate="chrome110", timeout=15)
         
         if response.status_code != 200:
-            print(f"HATA! RSS Kapisi da kapali. Kod: {response.status_code}")
+            print(f"HATA! Site yine de engelledi. Kod: {response.status_code}")
             return
 
         # XML verisini parcala
@@ -59,14 +56,10 @@ def rss_tara():
         items = soup.find_all('item')
         
         if len(items) > 0:
-            son_mac = items[0] # En ustteki (en son) mac
-            
-            # Baslik: "Team A vs Team B" formatindadir
+            son_mac = items[0]
             baslik = son_mac.title.text
             link = son_mac.link.text
-            aciklama = son_mac.description.text 
             
-            # Takimlari ayikla (Genelde ' vs ' ile ayrilir)
             if " vs " in baslik:
                 parts = baslik.split(" vs ")
                 takim1 = parts[0].strip()
@@ -75,7 +68,7 @@ def rss_tara():
                 takim1 = "Takım A"
                 takim2 = "Takım B"
             
-            print(f"RSS Verisi Cekildi: {baslik}")
+            print(f"VERI ALINDI: {baslik}")
 
             # Hafiza Kontrolu
             client = twitter_client_v2()
@@ -84,37 +77,32 @@ def rss_tara():
                 tweets = client.get_users_tweets(id=me.data.id, max_results=5)
                 if tweets.data:
                     for tweet in tweets.data:
-                        # RSS basliklari cok nettir, direkt kiyaslayabiliriz
                         if takim1 in tweet.text and takim2 in tweet.text:
                             print(f"🛑 ZATEN PAYLASILMIS: {baslik}")
                             return
-            except:
-                pass
+            except Exception as e:
+                print(f"Hafiza hatasi (onemsiz): {e}")
 
             # Tweet Hazirla
             bayrak1 = bayrak_getir(takim1)
             bayrak2 = bayrak_getir(takim2)
             
-            # RSS'de skor bazen aciklamada yazar, bazen yazmaz.
-            # Garanti olsun diye baslik ve linki paylasiyoruz.
-            
             tweet_metni = (
                 f"🚨 MAÇ SONUCU\n\n"
                 f"{takim1} {bayrak1} 🆚 {takim2} {bayrak2}\n\n"
-                f"Detaylar: {link}\n"
+                f"Link: {link}\n"
                 f"#CS2 #HLTV"
             )
             
             # --- TWEET AT ---
-            print("TWEET GONDERILIYOR...")
             client.create_tweet(text=tweet_metni)
-            print("✅ TWEET BASARIYLA ATILDI (RSS Yontemi)")
+            print("✅ TWEET BASARIYLA ATILDI (Curl_CFFI Yontemi)")
             
         else:
             print("RSS Listesi bos.")
 
     except Exception as e:
-        print(f"RSS Hatasi: {e}")
+        print(f"Kritik Hata: {e}")
 
 if __name__ == "__main__":
-    rss_tara()
+    ajan_modu()
