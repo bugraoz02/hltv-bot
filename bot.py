@@ -1,12 +1,14 @@
 import tweepy
-from curl_cffi import requests # EN GUCLU SILAH
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 import os
 import time
 
 # --- 1. AYARLAR ---
-# RSS (404) bitti, tekrar ana siteye donuyoruz
 HEDEF_URL = "https://www.hltv.org/results"
+# 15 dakikada bir calisiyoruz, 20 dk tolerans yeterli.
+# Boylece ayni maci ikinci kez denemez bile.
+MAX_DAKIKA = 20 
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
@@ -38,50 +40,52 @@ def bayrak_getir(takim_adi):
 def twitter_client_v2():
     return tweepy.Client(consumer_key=api_key, consumer_secret=api_secret, access_token=access_token, access_token_secret=access_secret)
 
-# --- 4. DATA CEKME ---
+# --- 4. AKILLI DATA CEKME ---
 def ajan_modu():
-    print("HLTV Ana Sayfasi 'Chrome 110' ile zorlaniyor...")
+    print(f"HLTV kontrol ediliyor (Max {MAX_DAKIKA} dakika)...")
     
     try:
-        # Ana siteye en guclu taklitle giriyoruz
         response = requests.get(HEDEF_URL, impersonate="chrome110", timeout=20)
         
-        # Eger yine engellerse kodu gorelim
         if response.status_code != 200:
-            print(f"HATA! Erişim Engellendi. Kod: {response.status_code}")
+            print(f"HATA! Siteye girilemedi. Kod: {response.status_code}")
             return
 
         soup = BeautifulSoup(response.content, 'html.parser')
         son_mac = soup.find('div', class_='result-con')
         
         if son_mac:
-            # HTML yapisindan verileri al
+            # --- ZAMAN KONTROLU ---
+            try:
+                mac_zamani_ms = int(son_mac['data-unix'])
+                mac_zamani_sec = mac_zamani_ms / 1000
+                
+                su_an = time.time()
+                gecen_sure_dk = (su_an - mac_zamani_sec) / 60
+                
+                print(f"Son maç {int(gecen_sure_dk)} dakika önce bitmiş.")
+                
+                if gecen_sure_dk > MAX_DAKIKA:
+                    print(f"🛑 BU MAC ESKI! ({int(gecen_sure_dk)} dk > {MAX_DAKIKA} dk). Pas geciliyor.")
+                    return 
+                    
+            except Exception as e:
+                print(f"Zaman hesaplanamadi, guvenlik icin pas geciliyor: {e}")
+                return
+
+            # Eger mac taze ise (20 dk icindeyse) verileri al
             takimlar = son_mac.find_all('div', class_='team')
             takim1 = takimlar[0].text.strip()
             takim2 = takimlar[1].text.strip()
             skor_span = son_mac.find('td', class_='result-score')
             skor = skor_span.text.strip() if skor_span else "Bitti"
             
-            # Turnuva adi
             try:
                 turnuva = son_mac.find_parent('div', class_='results-sublist').find('span', class_='event-name').text
             except:
                 turnuva = "CS2 Turnuvası"
 
-            print(f"VERI ALINDI: {takim1} vs {takim2}")
-
-            # Hafiza Kontrolu
-            client = twitter_client_v2()
-            try:
-                me = client.get_me()
-                tweets = client.get_users_tweets(id=me.data.id, max_results=5)
-                if tweets.data:
-                    for tweet in tweets.data:
-                        if takim1 in tweet.text and takim2 in tweet.text:
-                            print(f"🛑 ZATEN PAYLASILMIS: {takim1} vs {takim2}")
-                            return
-            except Exception as e:
-                print(f"Hafiza hatasi (onemsiz): {e}")
+            print(f"YENI TWEET ATILIYOR: {takim1} vs {takim2}")
 
             # Tweet Hazirla
             bayrak1 = bayrak_getir(takim1)
@@ -96,11 +100,19 @@ def ajan_modu():
             )
             
             # --- TWEET AT ---
-            client.create_tweet(text=tweet_metni)
-            print("✅ TWEET BASARIYLA ATILDI (Curl_CFFI + HTML Yontemi)")
+            try:
+                client = twitter_client_v2()
+                client.create_tweet(text=tweet_metni)
+                print("✅ TWEET BASARIYLA ATILDI!")
+            
+            except tweepy.errors.Forbidden as e:
+                if "duplicate" in str(e).lower():
+                    print("🛑 Twitter engelledi: Bu tweet zaten var (Cift koruma).")
+                else:
+                    print(f"⚠️ Tweet atilamadi: {e}")
             
         else:
-            print("Sayfa acildi ama mac sonucu bulunamadi (HTML yapisi degismis olabilir).")
+            print("Veri cekilemedi.")
 
     except Exception as e:
         print(f"Kritik Hata: {e}")
