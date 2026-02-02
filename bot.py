@@ -6,9 +6,9 @@ import time
 
 # --- 1. AYARLAR ---
 HEDEF_URL = "https://www.hltv.org/results"
-# 20 dakika ayari cok onemli! 
-# Bot 15 dk'da bir calisir. Eger mac 20 dk'dan eskiyse "Bunu zaten gormusumdur" der ve atlar.
-MAX_DAKIKA = 20 
+# 20 dakikayi 1 gune (1440 dakikaya) cikardik.
+# Artik son 24 saat icinde bitmis en guncel maci paylasir.
+MAX_DAKIKA = 1440 
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
@@ -40,9 +40,9 @@ def bayrak_getir(takim_adi):
 def twitter_client_v2():
     return tweepy.Client(consumer_key=api_key, consumer_secret=api_secret, access_token=access_token, access_token_secret=access_secret)
 
-# --- 4. DATA CEKME ---
+# --- 4. AKILLI DATA CEKME ---
 def ajan_modu():
-    print(f"HLTV kontrol ediliyor (Sadece son {MAX_DAKIKA} dakikadaki maclar)...")
+    print(f"HLTV kontrol ediliyor (Son {MAX_DAKIKA} dakika / 24 Saat)...")
     
     try:
         # Chrome taklidi ile siteye gir
@@ -65,7 +65,7 @@ def ajan_modu():
                 break 
         
         if son_mac:
-            # --- BEDAVA HAFIZA (ZAMAN KONTROLU) ---
+            # --- ZAMAN KONTROLU ---
             try:
                 mac_zamani_ms = int(son_mac['data-unix'])
                 mac_zamani_sec = mac_zamani_ms / 1000
@@ -74,17 +74,15 @@ def ajan_modu():
                 
                 print(f"Tespit edilen maç {int(gecen_sure_dk)} dakika önce bitmiş.")
                 
-                # Eger mac 20 dakikadan eskiyse PAYLASMA.
-                # Cunku bot 15 dk'da bir calisiyor, demek ki bunu onceki turda paylasti.
+                # 1440 dakikadan (24 saatten) eskiyse paylasma
                 if gecen_sure_dk > MAX_DAKIKA:
-                    print(f"🛑 ESKI MAC TESPIT EDILDI ({int(gecen_sure_dk)} dk). Pas geciliyor.")
+                    print(f"🛑 ESKI MAC ({int(gecen_sure_dk)} dk). Pas geciliyor.")
                     return 
                     
             except Exception as e:
-                print(f"Zaman okunamadi, risk almamak icin paylasilmiyor: {e}")
-                return
+                print(f"Zaman okunamadi, devam ediliyor: {e}")
 
-            # Eger buraya geldiysek mac tazedir (0-20 dk arasi).
+            # Eger buraya geldiysek mac son 24 saat icindedir.
             takimlar = son_mac.find_all('div', class_='team')
             takim1 = takimlar[0].text.strip()
             takim2 = takimlar[1].text.strip()
@@ -96,7 +94,7 @@ def ajan_modu():
             except:
                 turnuva = "CS2 Turnuvası"
 
-            print(f"✅ YENI MAC! TWEET HAZIRLANIYOR: {takim1} vs {takim2}")
+            print(f"✅ TWEET HAZIRLANIYOR: {takim1} vs {takim2}")
 
             # Tweet Hazirla
             bayrak1 = bayrak_getir(takim1)
@@ -117,11 +115,13 @@ def ajan_modu():
                 print("✅ TWEET BASARIYLA ATILDI!")
             
             except tweepy.errors.Forbidden as e:
-                # Eger cok sanssizsak ve Twitter "Duplicate" derse:
+                # Ayni maci tekrar paylasmaya calisirsak Twitter engeller, sorun yok.
                 if "duplicate" in str(e).lower():
-                    print("🛑 Twitter engelledi: Bu tweet zaten var.")
+                    print("🛑 Twitter engelledi: Bu tweet zaten var (Spam korumasi).")
                 else:
                     print(f"⚠️ HATA: {e}")
+            except Exception as e:
+                print(f"Genel Hata: {e}")
             
         else:
             print("Gecerli mac bulunamadi.")
