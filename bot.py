@@ -5,8 +5,7 @@ import os
 import time
 
 # --- 1. AYARLAR ---
-HEDEF_URL = "https://www.hltv.org/results?event=8240"
-MAX_DAKIKA = 900 # 20 dakikadan eski maclari "Eski" sayip paylasmaz
+HEDEF_URL = "https://www.hltv.org/results"
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
@@ -40,7 +39,7 @@ def twitter_client_v2():
 
 # --- 4. AKILLI DATA CEKME ---
 def ajan_modu():
-    print(f"HLTV kontrol ediliyor (Max {MAX_DAKIKA} dakika)...")
+    print("HLTV kontrol ediliyor (Saat kontrolu kapali)...")
     
     try:
         response = requests.get(HEDEF_URL, impersonate="chrome110", timeout=20)
@@ -51,35 +50,12 @@ def ajan_modu():
 
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # --- YENILIK: Sadece ilk kutuyu degil, gecerli olan ILK kutuyu ariyoruz ---
+        # Direkt ilk sonucu aliyoruz, saat aramiyoruz.
         tum_sonuclar = soup.find_all('div', class_='result-con')
-        son_mac = None
         
-        for aday in tum_sonuclar:
-            # Eger bu kutunun 'data-unix' (zaman) etiketi varsa, aradigimiz mactir.
-            if 'data-unix' in aday.attrs:
-                son_mac = aday
-                break # Bulduk, donguden cik.
-        
-        if son_mac:
-            # --- ZAMAN KONTROLU ---
-            try:
-                mac_zamani_ms = int(son_mac['data-unix'])
-                mac_zamani_sec = mac_zamani_ms / 1000
-                
-                su_an = time.time()
-                gecen_sure_dk = (su_an - mac_zamani_sec) / 60
-                
-                print(f"Son maç {int(gecen_sure_dk)} dakika önce bitmiş.")
-                
-                if gecen_sure_dk > MAX_DAKIKA:
-                    print(f"🛑 BU MAC ESKI! ({int(gecen_sure_dk)} dk > {MAX_DAKIKA} dk). Pas geciliyor.")
-                    return 
-                    
-            except Exception as e:
-                print(f"Zaman hesaplanamadi: {e}")
-                return
-
+        if len(tum_sonuclar) > 0:
+            son_mac = tum_sonuclar[0] # En ustteki (en son) mac
+            
             # Verileri al
             takimlar = son_mac.find_all('div', class_='team')
             takim1 = takimlar[0].text.strip()
@@ -92,7 +68,7 @@ def ajan_modu():
             except:
                 turnuva = "CS2 Turnuvası"
 
-            print(f"YENI TWEET ATILIYOR: {takim1} vs {takim2}")
+            print(f"EN SON MAC BULUNDU: {takim1} vs {takim2}")
 
             # Tweet Hazirla
             bayrak1 = bayrak_getir(takim1)
@@ -113,10 +89,14 @@ def ajan_modu():
                 print("✅ TWEET BASARIYLA ATILDI!")
             
             except tweepy.errors.Forbidden as e:
+                # Eger "Duplicate" hatasi gelirse, Twitter "Bunu zaten attin" diyordur.
                 if "duplicate" in str(e).lower():
-                    print("🛑 Twitter engelledi: Bu tweet zaten var (Cift koruma).")
+                    print("🛑 DURDURULDU: Bu mac zaten paylasilmis (Twitter engelledi).")
                 else:
-                    print(f"⚠️ Tweet atilamadi: {e}")
+                    print(f"⚠️ Tweet atilamadi (Yasakli): {e}")
+            
+            except Exception as e:
+                print(f"⚠️ Tweet atarken genel hata: {e}")
             
         else:
             print("Gecerli bir mac sonucu bulunamadi (Sayfa bos veya yapi degismis).")
