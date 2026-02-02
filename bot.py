@@ -3,6 +3,7 @@ import cloudscraper
 from bs4 import BeautifulSoup
 import os
 import time
+import random
 
 # --- 1. AYARLAR ---
 HEDEF_URL = "https://www.hltv.org/results" 
@@ -34,42 +35,31 @@ def bayrak_getir(takim_adi):
             return bayrak
     return ""
 
-# --- 4. TWITTER BAGLANTILARI ---
 def twitter_client_v2():
     return tweepy.Client(consumer_key=api_key, consumer_secret=api_secret, access_token=access_token, access_token_secret=access_secret)
 
-# --- 5. HAFIZA KONTROLU (AYNI MACI PAYLASMAMAK ICIN) ---
-def daha_once_paylasildi_mi(client, takim1, takim2):
-    try:
-        # Senin attigin son 5 tweeti kontrol et
-        me = client.get_me()
-        my_id = me.data.id
-        tweets = client.get_users_tweets(id=my_id, max_results=5)
-        
-        if not tweets.data:
-            return False # Hic tweet yoksa paylasilmamistir
-
-        for tweet in tweets.data:
-            # Eger son tweetlerde iki takimin adi da geciyorsa "Paylasildi" say
-            if takim1 in tweet.text and takim2 in tweet.text:
-                return True
-        return False
-    except Exception as e:
-        print(f"Hafiza kontrolunde hata (Onemsiz): {e}")
-        return False
-
-# --- 6. ANA PROGRAM ---
+# --- 4. DATA CEKME ---
 def siteyi_tara():
-    print("Bot baslatiliyor...")
-    scraper = cloudscraper.create_scraper()
+    print("HLTV Guclendirilmis Mod ile kontrol ediliyor...")
     
-    # Twitter baglantisini basta kuralim (Hafiza kontrolu icin lazim)
+    # --- YENILIK: Gercek Masaustu Tarayicisi Taklidi ---
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        }
+    )
+    
+    # Twitter istemcisi (Hafiza kontrolu icin)
     client = twitter_client_v2()
     
     try:
+        # Sonuc sayfasini cek
         response = scraper.get(HEDEF_URL)
+        
         if response.status_code != 200:
-            print("Siteye girilemedi.")
+            print(f"HATA! Engel asilamadi. Kod: {response.status_code}")
             return
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -82,37 +72,54 @@ def siteyi_tara():
             takim2_isim = takimlar[1].text.strip()
             skor = son_mac.find('td', class_='result-score').text.strip()
             
-            # --- KRITIK KONTROL: TEKRAR PAYLASIMI ENGELLEME ---
-            if daha_once_paylasildi_mi(client, takim1_isim, takim2_isim):
-                print(f"🛑 DURDURULDU: {takim1_isim} vs {takim2_isim} maci zaten paylasilmis.")
-                return # Programi burada bitir, tweet atma.
+            # Hafiza Kontrolu (Daha once paylasildi mi?)
+            try:
+                me = client.get_me()
+                my_id = me.data.id
+                tweets = client.get_users_tweets(id=my_id, max_results=5)
+                zaten_var = False
+                if tweets.data:
+                    for tweet in tweets.data:
+                        if takim1_isim in tweet.text and takim2_isim in tweet.text:
+                            zaten_var = True
+                            break
+                
+                if zaten_var:
+                    print(f"DURDURULDU: {takim1_isim} vs {takim2_isim} zaten paylasilmis.")
+                    return
+            except:
+                pass # Hafiza hatasi olursa devam et
 
-            # Eger paylasilmadiysa devam et...
+            # Turnuva Adi
             try:
                 turnuva = son_mac.find_parent('div', class_='results-sublist').find('span', class_='event-name').text
             except:
                 turnuva = "CS2 Turnuvası"
 
-            # --- MVP BULMA ---
+            # --- MVP BULMA (HATA VERIRSE GEC) ---
             mvp_bilgisi = "Seçilmedi"
             try:
                 mac_linki = son_mac.find('a', class_='a-reset')['href']
                 tam_link = "https://www.hltv.org" + mac_linki
-                print(f"Detaylar icin mac sayfasina gidiliyor: {tam_link}")
+                
+                # Sitede cok hizli gezince blok yiyoruz, biraz bekle
+                time.sleep(random.uniform(1, 3))
                 
                 mac_response = scraper.get(tam_link)
-                mac_soup = BeautifulSoup(mac_response.text, 'html.parser')
-                
-                mvp_kutusu = mac_soup.find('div', class_='highlighted-player')
-                if mvp_kutusu:
-                    oyuncu_adi = mvp_kutusu.find('span', class_='player-nick').text.strip()
-                    stats = mvp_kutusu.find('div', class_='stats')
-                    rating = stats.find('span', class_='value').text.strip() if stats else "N/A"
-                    mvp_bilgisi = f"{oyuncu_adi} ({rating} Rating)"
+                if mac_response.status_code == 200:
+                    mac_soup = BeautifulSoup(mac_response.text, 'html.parser')
+                    mvp_kutusu = mac_soup.find('div', class_='highlighted-player')
+                    if mvp_kutusu:
+                        oyuncu_adi = mvp_kutusu.find('span', class_='player-nick').text.strip()
+                        stats = mvp_kutusu.find('div', class_='stats')
+                        rating = stats.find('span', class_='value').text.strip() if stats else ""
+                        mvp_bilgisi = f"{oyuncu_adi} ({rating} Rating)"
+                else:
+                    print("MVP detayina girilemedi (Engel).")
             except:
-                pass
+                mvp_bilgisi = "Veri Yok"
 
-            # --- TWEET HAZIRLAMA ---
+            # --- TWEET HAZIRLA ---
             bayrak1 = bayrak_getir(takim1_isim)
             bayrak2 = bayrak_getir(takim2_isim)
             
@@ -124,16 +131,15 @@ def siteyi_tara():
                 f"#CS2"
             )
             
-            # --- TEST MODU (LOGLARA YAZAR) ---
             print("\n" + "="*40)
-            print("AYNI TWEET BULUNAMADI, PAYLASIMA HAZIR:")
+            print("BASARILI! ENGEL ASILDI. TWEET HAZIR:")
             print("-" * 20)
             print(tweet_metni)
             print("-" * 20)
             
-            # --- GERCEK PAYLASIM (AKTIF ETMEK ICIN ALTTAKI '#' ISARETINI SIL) ---
+            # --- TWEET ATMAK ICIN ASAGIDAKI SATIRIN BASINDAKI # ISARETINI SIL ---
             # client.create_tweet(text=tweet_metni) 
-            # print("✅ TWEET BASARIYLA ATILDI!")
+            # print("✅ TWEET GONDERILDI")
             
         else:
             print("Mac sonucu bulunamadi.")
