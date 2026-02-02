@@ -5,7 +5,7 @@ import os
 import time
 
 # --- 1. AYARLAR ---
-HEDEF_URL = "https://www.hltv.org/results"
+HEDEF_URL = "https://www.hltv.org/results?event=8240"
 MAX_DAKIKA = 20  # 20 dakikadan eski maclari "Eski" sayip paylasmaz.
 
 # --- 2. GITHUB SIFRELERI ---
