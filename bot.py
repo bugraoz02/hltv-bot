@@ -1,12 +1,12 @@
 import tweepy
-from curl_cffi import requests # EN GUCLU ENGEL ASICI
+from curl_cffi import requests # EN GUCLU SILAH
 from bs4 import BeautifulSoup
 import os
 import time
 
 # --- 1. AYARLAR ---
-# Hem RSS hem Chrome taklidi kullaniyoruz
-HEDEF_URL = "https://www.hltv.org/rss/results"
+# RSS (404) bitti, tekrar ana siteye donuyoruz
+HEDEF_URL = "https://www.hltv.org/results"
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
@@ -40,35 +40,35 @@ def twitter_client_v2():
 
 # --- 4. DATA CEKME ---
 def ajan_modu():
-    print("HLTV 'Chrome 110' Parmak Izi ile kontrol ediliyor...")
+    print("HLTV Ana Sayfasi 'Chrome 110' ile zorlaniyor...")
     
     try:
-        # SIHIRLI KISIM: impersonate="chrome110"
-        # Bu satir Cloudflare'e "Yemin ederim ben Chrome tarayicisiyim" der.
-        response = requests.get(HEDEF_URL, impersonate="chrome110", timeout=15)
+        # Ana siteye en guclu taklitle giriyoruz
+        response = requests.get(HEDEF_URL, impersonate="chrome110", timeout=20)
         
+        # Eger yine engellerse kodu gorelim
         if response.status_code != 200:
-            print(f"HATA! Site yine de engelledi. Kod: {response.status_code}")
+            print(f"HATA! Erişim Engellendi. Kod: {response.status_code}")
             return
 
-        # XML verisini parcala
-        soup = BeautifulSoup(response.content, 'xml')
-        items = soup.find_all('item')
+        soup = BeautifulSoup(response.content, 'html.parser')
+        son_mac = soup.find('div', class_='result-con')
         
-        if len(items) > 0:
-            son_mac = items[0]
-            baslik = son_mac.title.text
-            link = son_mac.link.text
+        if son_mac:
+            # HTML yapisindan verileri al
+            takimlar = son_mac.find_all('div', class_='team')
+            takim1 = takimlar[0].text.strip()
+            takim2 = takimlar[1].text.strip()
+            skor_span = son_mac.find('td', class_='result-score')
+            skor = skor_span.text.strip() if skor_span else "Bitti"
             
-            if " vs " in baslik:
-                parts = baslik.split(" vs ")
-                takim1 = parts[0].strip()
-                takim2 = parts[1].strip()
-            else:
-                takim1 = "Takım A"
-                takim2 = "Takım B"
-            
-            print(f"VERI ALINDI: {baslik}")
+            # Turnuva adi
+            try:
+                turnuva = son_mac.find_parent('div', class_='results-sublist').find('span', class_='event-name').text
+            except:
+                turnuva = "CS2 Turnuvası"
+
+            print(f"VERI ALINDI: {takim1} vs {takim2}")
 
             # Hafiza Kontrolu
             client = twitter_client_v2()
@@ -78,7 +78,7 @@ def ajan_modu():
                 if tweets.data:
                     for tweet in tweets.data:
                         if takim1 in tweet.text and takim2 in tweet.text:
-                            print(f"🛑 ZATEN PAYLASILMIS: {baslik}")
+                            print(f"🛑 ZATEN PAYLASILMIS: {takim1} vs {takim2}")
                             return
             except Exception as e:
                 print(f"Hafiza hatasi (onemsiz): {e}")
@@ -89,17 +89,18 @@ def ajan_modu():
             
             tweet_metni = (
                 f"🚨 MAÇ SONUCU\n\n"
-                f"{takim1} {bayrak1} 🆚 {takim2} {bayrak2}\n\n"
-                f"Link: {link}\n"
+                f"{takim1} {bayrak1} 🆚 {takim2} {bayrak2}\n"
+                f"Skor: {skor}\n\n"
+                f"🏆 {turnuva}\n"
                 f"#CS2 #HLTV"
             )
             
             # --- TWEET AT ---
             client.create_tweet(text=tweet_metni)
-            print("✅ TWEET BASARIYLA ATILDI (Curl_CFFI Yontemi)")
+            print("✅ TWEET BASARIYLA ATILDI (Curl_CFFI + HTML Yontemi)")
             
         else:
-            print("RSS Listesi bos.")
+            print("Sayfa acildi ama mac sonucu bulunamadi (HTML yapisi degismis olabilir).")
 
     except Exception as e:
         print(f"Kritik Hata: {e}")
