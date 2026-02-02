@@ -6,7 +6,7 @@ import time
 
 # --- 1. AYARLAR ---
 HEDEF_URL = "https://www.hltv.org/results?event=8240"
-MAX_DAKIKA = 20  # 20 dakikadan eski maclari "Eski" sayip paylasmaz.
+MAX_DAKIKA = 900 # 20 dakikadan eski maclari "Eski" sayip paylasmaz
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
