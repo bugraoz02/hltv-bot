@@ -1,4 +1,4 @@
 tweepy
-requests
+cloudscraper
 beautifulsoup4
 Pillow
