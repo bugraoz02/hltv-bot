@@ -1,13 +1,15 @@
 import tweepy
-import requests
+import cloudscraper # YENI: Engel asici kutuphane
 from bs4 import BeautifulSoup
 import os
 from PIL import Image, ImageDraw, ImageFont
 
 # --- 1. AYARLAR ---
-# BURAYI DEGISTIR: Takip etmek istedigin turnuvanin ID'si
-# Ornek: hltv.org/events/7438/iem-katowice (Buradaki 7438 ID'dir)
-TURNUVA_ID = "8240" 
+# Test icin genel sonuclar sayfasina bakiyoruz.
+# Turnuva ozelinde bakmak istersen burayi degistirebiliriz.
+HEDEF_URL = "https://www.hltv.org/results" 
+# BURAYI DEGISTIR
+TURNUVA_ID = "8240"  # Linkten bulduğun sayıyı buraya yapıştır
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
@@ -24,92 +26,69 @@ def twitter_client_v2():
     return tweepy.Client(consumer_key=api_key, consumer_secret=api_secret, access_token=access_token, access_token_secret=access_secret)
 
 # --- 4. RESIM OLUSTURMA ---
-def resim_olustur(takim1, takim2, skor, asama, turnuva_adi):
-    # Arka plan (Siyah/Lacivert)
+def resim_olustur(takim1, takim2, skor):
     img = Image.new('RGB', (800, 450), color=(15, 20, 30))
     draw = ImageDraw.Draw(img)
     
-    # Font ayarlari (Varsayilan fontu kullanir)
+    # Font ayarlari
     font_buyuk = ImageFont.load_default()
-    font_orta = ImageFont.load_default()
     
     # Baslik
-    baslik = f"{turnuva_adi} | {asama}"
-    draw.text((400, 50), baslik, fill=(255, 200, 0), anchor="mm")
-
-    # Takim 1
-    draw.text((200, 225), takim1, fill="white", anchor="mm")
-
-    # Skor (Buyuk)
-    draw.text((400, 225), skor, fill=(0, 255, 100), anchor="mm")
-
-    # Takim 2
-    draw.text((600, 225), takim2, fill="white", anchor="mm")
-
-    # Alt Bilgi
-    draw.text((400, 400), "MAC SONUCU", fill=(100, 100, 150), anchor="mm")
+    draw.text((400, 50), "MAC SONUCU", fill=(255, 165, 0), anchor="mm")
     
-    img.save("turnuva_karti.png")
-    return "turnuva_karti.png"
+    # Takimlar ve Skor
+    draw.text((200, 225), takim1, fill="white", anchor="mm")
+    draw.text((400, 225), skor, fill=(0, 255, 0), anchor="mm")
+    draw.text((600, 225), takim2, fill="white", anchor="mm")
+    
+    img.save("mac_karti.png")
+    return "mac_karti.png"
 
 # --- 5. DATA CEKME VE PAYLASMA ---
-def turnuva_takip_et():
-    # Sadece secilen turnuvanin sonuclarina gidiyoruz
-    url = f"https://www.hltv.org/results?event={TURNUVA_ID}"
+def siteyi_tara():
+    print("HLTV'ye Cloudscraper ile baglaniliyor...")
     
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    # Engel asici motoru calistiriyoruz
+    scraper = cloudscraper.create_scraper()
     
     try:
-        print(f"{TURNUVA_ID} nolu turnuva kontrol ediliyor...")
-        response = requests.get(url, headers=headers)
+        response = scraper.get(HEDEF_URL)
         
+        # Eger site hala engelliyorsa kodu gosterelim
         if response.status_code != 200:
-            print("Siteye ulasilamadi.")
+            print(f"HATA! Site yine engelledi veya ulasilamadi. Hata Kodu: {response.status_code}")
             return
 
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Turnuva adini al
-        turnuva_baslik = soup.find('div', class_='event-name')
-        turnuva_adi = turnuva_baslik.text.strip() if turnuva_baslik else "Turnuva"
-
-        # En son biten maci bul
-        son_sonuc = soup.find('div', class_='result-con')
+        # En son maci bul
+        son_mac = soup.find('div', class_='result-con')
         
-        if son_sonuc:
-            takimlar = son_sonuc.find_all('div', class_='team')
+        if son_mac:
+            takimlar = son_mac.find_all('div', class_='team')
             takim1 = takimlar[0].text.strip()
             takim2 = takimlar[1].text.strip()
-            skor = son_sonuc.find('td', class_='result-score').text.strip()
+            skor = son_mac.find('td', class_='result-score').text.strip()
             
-            # Asama bilgisi (Orn: Semi-final)
-            try:
-                # Event texti genelde result-con icinde veya ustunde olur
-                asama = son_sonuc.find_parent('div', class_='results-sublist').find('span', class_='event-name').text
-            except:
-                asama = "Match Day"
-
-            print(f"Mac Bulundu: {takim1} vs {takim2} - {skor}")
-
-            # 1. Gorseli Olustur
-            resim = resim_olustur(takim1, takim2, skor, asama, turnuva_adi)
+            print(f"BUNU TWEET ATIYORUM: {takim1} vs {takim2}")
             
-            # 2. Twitter'a Yukle
+            # Gorsel Hazirla
+            resim_yolu = resim_olustur(takim1, takim2, skor)
+            
+            # Twitter'a Yukle
             api_v1 = twitter_auth_v1()
-            medya = api_v1.media_upload(resim)
+            medya = api_v1.media_upload(resim_yolu)
             
-            # 3. Paylas
-            tweet_metni = f"🏆 {turnuva_adi}\n\n⚔️ {takim1} vs {takim2}\n📊 Skor: {skor}\n\nKazanan taraf belli oldu! #CS2 #Esports"
-            
+            # Paylas
             client_v2 = twitter_client_v2()
-            client_v2.create_tweet(text=tweet_metni, media_ids=[medya.media_id])
-            print("Tweet atildi!")
+            client_v2.create_tweet(text=f"🔥 Anlık Maç Sonucu:\n\n{takim1} vs {takim2}\nSkor: {skor}\n\n#CS2 #HLTV", media_ids=[medya.media_id])
+            print("BASARILI! Tweet atildi.")
             
         else:
-            print("Bu turnuvada henuz sonuc yok veya maclar baslamadi.")
+            print("Mac sonucu bulunamadi (HTML yapisi farkli olabilir).")
 
     except Exception as e:
-        print(f"Hata: {e}")
+        print(f"Kritik Hata: {e}")
 
 if __name__ == "__main__":
-    turnuva_takip_et()
+    siteyi_tara()
