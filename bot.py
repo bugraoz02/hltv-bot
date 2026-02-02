@@ -6,9 +6,7 @@ import time
 
 # --- 1. AYARLAR ---
 HEDEF_URL = "https://www.hltv.org/results"
-# 15 dakikada bir calisiyoruz, 20 dk tolerans yeterli.
-# Boylece ayni maci ikinci kez denemez bile.
-MAX_DAKIKA = 20 
+MAX_DAKIKA = 20  # 20 dakikadan eski maclari "Eski" sayip paylasmaz.
 
 # --- 2. GITHUB SIFRELERI ---
 api_key = os.environ.get("API_KEY")
@@ -52,7 +50,16 @@ def ajan_modu():
             return
 
         soup = BeautifulSoup(response.content, 'html.parser')
-        son_mac = soup.find('div', class_='result-con')
+        
+        # --- YENILIK: Sadece ilk kutuyu degil, gecerli olan ILK kutuyu ariyoruz ---
+        tum_sonuclar = soup.find_all('div', class_='result-con')
+        son_mac = None
+        
+        for aday in tum_sonuclar:
+            # Eger bu kutunun 'data-unix' (zaman) etiketi varsa, aradigimiz mactir.
+            if 'data-unix' in aday.attrs:
+                son_mac = aday
+                break # Bulduk, donguden cik.
         
         if son_mac:
             # --- ZAMAN KONTROLU ---
@@ -70,10 +77,10 @@ def ajan_modu():
                     return 
                     
             except Exception as e:
-                print(f"Zaman hesaplanamadi, guvenlik icin pas geciliyor: {e}")
+                print(f"Zaman hesaplanamadi: {e}")
                 return
 
-            # Eger mac taze ise (20 dk icindeyse) verileri al
+            # Verileri al
             takimlar = son_mac.find_all('div', class_='team')
             takim1 = takimlar[0].text.strip()
             takim2 = takimlar[1].text.strip()
@@ -112,7 +119,7 @@ def ajan_modu():
                     print(f"⚠️ Tweet atilamadi: {e}")
             
         else:
-            print("Veri cekilemedi.")
+            print("Gecerli bir mac sonucu bulunamadi (Sayfa bos veya yapi degismis).")
 
     except Exception as e:
         print(f"Kritik Hata: {e}")
