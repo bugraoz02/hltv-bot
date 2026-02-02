@@ -7,7 +7,7 @@ import time
 # --- 1. AYARLAR ---
 HEDEF_URL = "https://www.hltv.org/results"
 
-# --- 2. GITHUB SIFRELERI ---
+# --- 2. GITHUB SIFRELERI (Bu modda kullanilmasa da hata vermemesi icin dursun) ---
 api_key = os.environ.get("API_KEY")
 api_secret = os.environ.get("API_SECRET")
 access_token = os.environ.get("ACCESS_TOKEN")
@@ -34,27 +34,26 @@ def bayrak_getir(takim_adi):
             return bayrak
     return ""
 
-def twitter_client_v2():
-    return tweepy.Client(consumer_key=api_key, consumer_secret=api_secret, access_token=access_token, access_token_secret=access_secret)
-
 # --- 4. AKILLI DATA CEKME ---
 def ajan_modu():
-    print("HLTV kontrol ediliyor (Saat kontrolu kapali)...")
+    print("📢 DENEME MODU: Twitter API kapalı, sadece veri çekilecek...")
+    print("HLTV sitesine baglaniliyor...")
     
     try:
+        # En guclu yontemle siteye git
         response = requests.get(HEDEF_URL, impersonate="chrome110", timeout=20)
         
         if response.status_code != 200:
-            print(f"HATA! Siteye girilemedi. Kod: {response.status_code}")
+            print(f"❌ HATA! Siteye girilemedi. Kod: {response.status_code}")
             return
 
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Direkt ilk sonucu aliyoruz, saat aramiyoruz.
+        # En ustteki maci al
         tum_sonuclar = soup.find_all('div', class_='result-con')
         
         if len(tum_sonuclar) > 0:
-            son_mac = tum_sonuclar[0] # En ustteki (en son) mac
+            son_mac = tum_sonuclar[0] 
             
             # Verileri al
             takimlar = son_mac.find_all('div', class_='team')
@@ -68,8 +67,6 @@ def ajan_modu():
             except:
                 turnuva = "CS2 Turnuvası"
 
-            print(f"EN SON MAC BULUNDU: {takim1} vs {takim2}")
-
             # Tweet Hazirla
             bayrak1 = bayrak_getir(takim1)
             bayrak2 = bayrak_getir(takim2)
@@ -82,27 +79,20 @@ def ajan_modu():
                 f"#CS2 #HLTV"
             )
             
-            # --- TWEET AT ---
-            try:
-                client = twitter_client_v2()
-                client.create_tweet(text=tweet_metni)
-                print("✅ TWEET BASARIYLA ATILDI!")
-            
-            except tweepy.errors.Forbidden as e:
-                # Eger "Duplicate" hatasi gelirse, Twitter "Bunu zaten attin" diyordur.
-                if "duplicate" in str(e).lower():
-                    print("🛑 DURDURULDU: Bu mac zaten paylasilmis (Twitter engelledi).")
-                else:
-                    print(f"⚠️ Tweet atilamadi (Yasakli): {e}")
-            
-            except Exception as e:
-                print(f"⚠️ Tweet atarken genel hata: {e}")
+            # --- SIMULASYON CIKTISI ---
+            print("\n" + "="*40)
+            print("✅ BAŞARILI! Veri çekildi.")
+            print("Eğer API açık olsaydı şu tweet atılacaktı:")
+            print("-" * 30)
+            print(tweet_metni)
+            print("-" * 30)
+            print("="*40 + "\n")
             
         else:
-            print("Gecerli bir mac sonucu bulunamadi (Sayfa bos veya yapi degismis).")
+            print("⚠️ Geçerli bir maç sonucu bulunamadı (Sayfa boş olabilir).")
 
     except Exception as e:
-        print(f"Kritik Hata: {e}")
+        print(f"❌ Kritik Hata: {e}")
 
 if __name__ == "__main__":
     ajan_modu()
