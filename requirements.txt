@@ -1,4 +1,3 @@
 tweepy
-cloudscraper
+curl_cffi
 beautifulsoup4
-Pillow
